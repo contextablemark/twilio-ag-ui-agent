@@ -234,16 +234,46 @@ export class TwilioAgent {
 
   handleAgentEvent(event, ws, agent) {
     switch (event.type) {
+      case "TEXT_MESSAGE_CHUNK":
+        // Handle self-contained chunk event by transforming it into START/CONTENT/END sequence
+        // This is a convenience event that combines all three phases
+        const chunkMessageId = event.messageId || uuidv4();
+        const chunkDelta = event.delta || "";
+
+        // Emit START
+        this.handleAgentEvent({
+          type: "TEXT_MESSAGE_START",
+          messageId: chunkMessageId,
+          role: event.role || "assistant"
+        }, ws, agent);
+
+        // Emit CONTENT (if there's content)
+        if (chunkDelta) {
+          this.handleAgentEvent({
+            type: "TEXT_MESSAGE_CONTENT",
+            messageId: chunkMessageId,
+            delta: chunkDelta
+          }, ws, agent);
+        }
+
+        // Emit END
+        this.handleAgentEvent({
+          type: "TEXT_MESSAGE_END",
+          messageId: chunkMessageId
+        }, ws, agent);
+        break;
+
       case "TEXT_MESSAGE_START":
         // Initialize tracking for the new message
         agent._currentMessageId = event.messageId;
         agent._currentContent = "";
+        agent._currentRole = event.role || "assistant";
         break;
 
       case "TEXT_MESSAGE_CONTENT":
         // Stream content tokens to Twilio
         agent._currentContent = (agent._currentContent || "") + event.delta;
-        
+
         ws.send(JSON.stringify({
           type: "text",
           token: event.delta,
@@ -258,25 +288,29 @@ export class TwilioAgent {
           token: "",
           last: true
         }));
-        
+
         // Update agent's message history with the complete response (if stateful)
-        if (this.stateful && agent._currentMessageId && agent._currentContent) {
+        // Check for undefined/null instead of truthiness to allow empty strings
+        if (this.stateful && agent._currentMessageId && agent._currentContent !== undefined) {
           const assistantMessage = {
             id: agent._currentMessageId,
-            role: "assistant",
+            role: agent._currentRole || "assistant",
             content: agent._currentContent
           };
-          
+
           agent.messages = agent.messages || [];
           agent.messages.push(assistantMessage);
         }
-        
+
         // Clean up temporary tracking
-        if (agent._currentMessageId) {
+        if (agent._currentMessageId !== undefined) {
           delete agent._currentMessageId;
         }
-        if (agent._currentContent) {
+        if (agent._currentContent !== undefined) {
           delete agent._currentContent;
+        }
+        if (agent._currentRole !== undefined) {
+          delete agent._currentRole;
         }
         break;
 

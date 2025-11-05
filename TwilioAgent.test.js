@@ -153,20 +153,131 @@ describe('TwilioAgent', () => {
       twilioAgent.stateful = false;
       mockAgent._currentMessageId = 'msg-123';
       mockAgent._currentContent = 'Hello world';
-      
+
       const event = {
         type: 'TEXT_MESSAGE_END'
       };
-      
+
       twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
-      
+
       expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
         type: 'text',
         token: '',
         last: true
       }));
-      
+
       // In stateless mode, messages should not be stored
+      expect(mockAgent.messages).toHaveLength(0);
+    });
+
+    it('should handle TEXT_MESSAGE_CHUNK event with messageId', () => {
+      const event = {
+        type: 'TEXT_MESSAGE_CHUNK',
+        messageId: 'msg-456',
+        delta: 'Complete message',
+        role: 'assistant'
+      };
+
+      twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+
+      // Should send the content token
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: 'Complete message',
+        last: false
+      }));
+
+      // Should send the end token
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: '',
+        last: true
+      }));
+
+      // Should store in message history (stateful mode)
+      expect(mockAgent.messages).toHaveLength(1);
+      expect(mockAgent.messages[0]).toEqual({
+        id: 'msg-456',
+        role: 'assistant',
+        content: 'Complete message'
+      });
+    });
+
+    it('should handle TEXT_MESSAGE_CHUNK event without messageId', () => {
+      const event = {
+        type: 'TEXT_MESSAGE_CHUNK',
+        delta: 'Message without ID'
+      };
+
+      twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+
+      // Should send the content token
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: 'Message without ID',
+        last: false
+      }));
+
+      // Should send the end token
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: '',
+        last: true
+      }));
+
+      // Should store in message history with generated ID
+      expect(mockAgent.messages).toHaveLength(1);
+      expect(mockAgent.messages[0]).toMatchObject({
+        role: 'assistant',
+        content: 'Message without ID'
+      });
+      expect(mockAgent.messages[0].id).toBeDefined();
+    });
+
+    it('should handle TEXT_MESSAGE_CHUNK event with empty delta', () => {
+      const event = {
+        type: 'TEXT_MESSAGE_CHUNK',
+        messageId: 'msg-789',
+        delta: ''
+      };
+
+      twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+
+      // Should only send the end token (no content)
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: '',
+        last: true
+      }));
+
+      // Should store empty message in history
+      expect(mockAgent.messages).toHaveLength(1);
+      expect(mockAgent.messages[0]).toEqual({
+        id: 'msg-789',
+        role: 'assistant',
+        content: ''
+      });
+    });
+
+    it('should handle TEXT_MESSAGE_CHUNK in stateless mode', () => {
+      twilioAgent.stateful = false;
+
+      const event = {
+        type: 'TEXT_MESSAGE_CHUNK',
+        messageId: 'msg-999',
+        delta: 'Stateless chunk'
+      };
+
+      twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+
+      // Should send tokens to Twilio
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: 'Stateless chunk',
+        last: false
+      }));
+
+      // Should NOT store in message history (stateless mode)
       expect(mockAgent.messages).toHaveLength(0);
     });
   });
