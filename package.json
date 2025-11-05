@@ -12,8 +12,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@ag-ui/client": "^0.0.30",
-    "@ag-ui/core": "^0.0.30",
+    "@ag-ui/client": "^0.0.40",
+    "@ag-ui/core": "^0.0.39",
     "@anthropic-ai/sdk": "^0.20.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/websocket": "^11.1.0",
