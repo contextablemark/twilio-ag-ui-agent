@@ -25,7 +25,8 @@ const twilioAgent = new TwilioAgent({
   welcomeGreeting: WELCOME_GREETING,
   wsPath: "/ws",
   backendAgent: backendAgent,
-  stateful: process.env.STATEFUL !== "false" // Default to true, set STATEFUL=false to disable
+  stateful: process.env.STATEFUL !== "false", // Default to true, set STATEFUL=false to disable
+  minChunkSize: parseInt(process.env.MIN_CHUNK_SIZE || "50", 10) // Minimum characters for TTS buffering
 });
 
 const fastify = Fastify({

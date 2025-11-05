@@ -9,6 +9,10 @@ export class TwilioAgent {
     this.backendAgent = config.backendAgent;
     this.stateful = config.stateful !== false; // Default to true (stateful)
     this.agentInstances = new Map();
+
+    // Buffering configuration to prevent TTS underflows
+    this.minChunkSize = config.minChunkSize || 50; // Minimum characters before sending
+    this.sentenceBoundaries = /[.!?;:]\s*$/; // Regex for sentence endings
   }
 
   attachToServer(fastify) {
@@ -268,20 +272,42 @@ export class TwilioAgent {
         agent._currentMessageId = event.messageId;
         agent._currentContent = "";
         agent._currentRole = event.role || "assistant";
+        agent._outputBuffer = ""; // Buffer for TTS chunk optimization
         break;
 
       case "TEXT_MESSAGE_CONTENT":
-        // Stream content tokens to Twilio
+        // Accumulate content for the full message
         agent._currentContent = (agent._currentContent || "") + event.delta;
 
-        ws.send(JSON.stringify({
-          type: "text",
-          token: event.delta,
-          last: false
-        }));
+        // Add delta to output buffer
+        agent._outputBuffer = (agent._outputBuffer || "") + event.delta;
+
+        // Flush buffer if we have enough content or hit a sentence boundary
+        const shouldFlush =
+          agent._outputBuffer.length >= this.minChunkSize ||
+          this.sentenceBoundaries.test(agent._outputBuffer);
+
+        if (shouldFlush && agent._outputBuffer.length > 0) {
+          ws.send(JSON.stringify({
+            type: "text",
+            token: agent._outputBuffer,
+            last: false
+          }));
+          agent._outputBuffer = "";
+        }
         break;
 
       case "TEXT_MESSAGE_END":
+        // Flush any remaining buffered content before ending
+        if (agent._outputBuffer && agent._outputBuffer.length > 0) {
+          ws.send(JSON.stringify({
+            type: "text",
+            token: agent._outputBuffer,
+            last: false
+          }));
+          agent._outputBuffer = "";
+        }
+
         // Signal end of message to Twilio
         ws.send(JSON.stringify({
           type: "text",
@@ -311,6 +337,9 @@ export class TwilioAgent {
         }
         if (agent._currentRole !== undefined) {
           delete agent._currentRole;
+        }
+        if (agent._outputBuffer !== undefined) {
+          delete agent._outputBuffer;
         }
         break;
 

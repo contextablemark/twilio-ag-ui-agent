@@ -51,6 +51,11 @@ npm run test:coverage
   - **Stateless**: Sends only current message to backend
 - Tracks partial message content during streaming via `agent._currentContent`
 - Handles interrupt truncation using `utteranceUntilInterrupt`
+- **TTS Buffering**: Prevents buffer underflows by accumulating small chunks
+  - Buffers text in `agent._outputBuffer` before sending to Twilio
+  - Flushes when buffer reaches `minChunkSize` (default: 50 characters)
+  - Flushes on sentence boundaries (`.!?;:`) for natural breaks
+  - Always flushes remaining content on `TEXT_MESSAGE_END`
 
 ### AG-UI Event Flow
 
@@ -69,8 +74,12 @@ TEXT_MESSAGE_CHUNK → Transforms into START/CONTENT/END sequence
 ```
 
 **State tracking pattern:**
-- `TEXT_MESSAGE_START` sets `agent._currentMessageId`, `agent._currentContent = ""`, and `agent._currentRole`
-- `TEXT_MESSAGE_CONTENT` appends `event.delta` to `agent._currentContent` and streams to Twilio
+- `TEXT_MESSAGE_START` sets `agent._currentMessageId`, `agent._currentContent = ""`, `agent._currentRole`, and `agent._outputBuffer = ""`
+- `TEXT_MESSAGE_CONTENT` appends `event.delta` to both `_currentContent` (full message) and `_outputBuffer` (pending TTS chunks)
+- Content is only sent to Twilio when:
+  - Buffer size reaches `minChunkSize` threshold
+  - Buffer ends with sentence boundary (`.!?;:`)
+  - `TEXT_MESSAGE_END` is received (flushes remaining buffer)
 - `TEXT_MESSAGE_END` adds complete message to `agent.messages[]` (stateful mode only) and cleans up temp vars
 - `TEXT_MESSAGE_CHUNK` is transformed by recursively calling handleAgentEvent with START/CONTENT/END events
 
@@ -99,6 +108,7 @@ Environment variables in `.env`:
 - `AGUI_BACKEND_URL` - AG-UI backend endpoint
 - `AGUI_API_KEY` - Optional authorization token
 - `STATEFUL` - `true` (default) sends full history, `false` sends only current message
+- `MIN_CHUNK_SIZE` - Minimum characters to buffer before sending to TTS (default: 50)
 - `LOG_LEVEL` - `info` (default) or `debug`
 
 ## Testing
@@ -114,6 +124,22 @@ npx vitest TwilioAgent.test.js
 ```
 
 ## Key Implementation Details
+
+### TTS Buffering Strategy
+The implementation buffers small text chunks to prevent TTS engine buffer underflows:
+
+**Buffering logic:**
+1. Incoming deltas accumulate in `agent._outputBuffer`
+2. Buffer is flushed and sent to Twilio when:
+   - Size reaches `minChunkSize` threshold (default 50 chars)
+   - Content ends with sentence boundary: `.!?;:`
+   - `TEXT_MESSAGE_END` event received (final flush)
+3. This prevents sending tiny chunks (e.g., individual characters) that cause TTS stuttering
+
+**Tuning for your use case:**
+- Increase `MIN_CHUNK_SIZE` for more stable TTS but higher latency
+- Decrease for faster response but potential audio gaps
+- Sentence boundaries provide natural breaks regardless of size
 
 ### Agent Instance Management
 - Each phone call gets isolated agent instance stored in `this.agentInstances` Map

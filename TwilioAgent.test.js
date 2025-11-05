@@ -97,62 +97,137 @@ describe('TwilioAgent', () => {
     it('should handle TEXT_MESSAGE_START event', () => {
       const event = {
         type: 'TEXT_MESSAGE_START',
-        messageId: 'msg-123'
+        messageId: 'msg-123',
+        role: 'assistant'
       };
-      
+
       twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
-      
+
       expect(mockAgent._currentMessageId).toBe('msg-123');
       expect(mockAgent._currentContent).toBe('');
+      expect(mockAgent._currentRole).toBe('assistant');
+      expect(mockAgent._outputBuffer).toBe('');
     });
     
-    it('should handle TEXT_MESSAGE_CONTENT event', () => {
+    it('should buffer small TEXT_MESSAGE_CONTENT chunks', () => {
+      mockAgent._outputBuffer = '';
+
       const event = {
         type: 'TEXT_MESSAGE_CONTENT',
         delta: 'Hello '
       };
-      
+
       twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
-      
+
+      // Should NOT send immediately (too small)
+      expect(mockWs.send).not.toHaveBeenCalled();
+      expect(mockAgent._currentContent).toBe('Hello ');
+      expect(mockAgent._outputBuffer).toBe('Hello ');
+    });
+
+    it('should flush buffer when chunk exceeds minChunkSize', () => {
+      mockAgent._outputBuffer = '';
+      twilioAgent.minChunkSize = 20;
+
+      const event = {
+        type: 'TEXT_MESSAGE_CONTENT',
+        delta: 'This is a longer message that exceeds the minimum chunk size'
+      };
+
+      twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+
+      // Should send the accumulated buffer
       expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
         type: 'text',
-        token: 'Hello ',
+        token: 'This is a longer message that exceeds the minimum chunk size',
         last: false
       }));
-      expect(mockAgent._currentContent).toBe('Hello ');
+      expect(mockAgent._outputBuffer).toBe('');
+    });
+
+    it('should flush buffer on sentence boundary', () => {
+      mockAgent._outputBuffer = '';
+      twilioAgent.minChunkSize = 100; // High threshold
+
+      const event = {
+        type: 'TEXT_MESSAGE_CONTENT',
+        delta: 'Short sentence. '
+      };
+
+      twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+
+      // Should send due to sentence boundary (period)
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: 'Short sentence. ',
+        last: false
+      }));
+      expect(mockAgent._outputBuffer).toBe('');
     });
     
     it('should handle TEXT_MESSAGE_END event in stateful mode', () => {
       mockAgent._currentMessageId = 'msg-123';
       mockAgent._currentContent = 'Hello world';
-      
+      mockAgent._outputBuffer = '';
+
       const event = {
         type: 'TEXT_MESSAGE_END'
       };
-      
+
       twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
-      
+
       expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
         type: 'text',
         token: '',
         last: true
       }));
-      
+
       expect(mockAgent.messages).toHaveLength(1);
       expect(mockAgent.messages[0]).toEqual({
         id: 'msg-123',
         role: 'assistant',
         content: 'Hello world'
       });
-      
+
       expect(mockAgent._currentMessageId).toBeUndefined();
       expect(mockAgent._currentContent).toBeUndefined();
+      expect(mockAgent._outputBuffer).toBeUndefined();
+    });
+
+    it('should flush remaining buffer on TEXT_MESSAGE_END', () => {
+      mockAgent._currentMessageId = 'msg-123';
+      mockAgent._currentContent = 'Buffered text';
+      mockAgent._outputBuffer = 'Buffered text';
+      mockAgent._currentRole = 'assistant';
+
+      const event = {
+        type: 'TEXT_MESSAGE_END'
+      };
+
+      twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+
+      // Should flush buffered content first
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: 'Buffered text',
+        last: false
+      }));
+
+      // Then send end signal
+      expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+        type: 'text',
+        token: '',
+        last: true
+      }));
+
+      expect(mockAgent._outputBuffer).toBeUndefined();
     });
     
     it('should handle TEXT_MESSAGE_END event in stateless mode', () => {
       twilioAgent.stateful = false;
       mockAgent._currentMessageId = 'msg-123';
       mockAgent._currentContent = 'Hello world';
+      mockAgent._outputBuffer = '';
 
       const event = {
         type: 'TEXT_MESSAGE_END'
