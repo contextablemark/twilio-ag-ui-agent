@@ -39,7 +39,7 @@ Phone Call → Twilio → ConversationRelay → WebSocket → TwilioAgent → AG
 1. Connect your GitHub repo to Railway
 2. Set required environment variables in the Railway dashboard:
    - `AGUI_BACKEND_URL` - Your AG-UI backend endpoint
-   - `AGUI_API_KEY` - Bearer token for backend authentication
+   - `AGUI_BEARER_TOKEN` - Bearer token for backend authentication
 3. Railway auto-sets `PORT` and `RAILWAY_PUBLIC_DOMAIN`
 4. Configure your Twilio phone number webhook to: `https://YOUR_RAILWAY_DOMAIN/twiml`
 5. Call your Twilio phone number
@@ -66,7 +66,7 @@ Phone Call → Twilio → ConversationRelay → WebSocket → TwilioAgent → AG
    ```env
    NGROK_URL=abc123.ngrok.io
    AGUI_BACKEND_URL=https://your-backend.example.com/chat
-   AGUI_API_KEY=your-api-key
+   AGUI_BEARER_TOKEN=your-api-key
    ```
 
 5. **Start the server:**
@@ -89,7 +89,7 @@ All configuration is via environment variables (no hardcoded URLs or secrets).
 | Variable | Description |
 |----------|-------------|
 | `AGUI_BACKEND_URL` | AG-UI backend endpoint (server exits if not set) |
-| `AGUI_API_KEY` | Bearer token for AG-UI backend authentication |
+| `AGUI_BEARER_TOKEN` | Bearer token for AG-UI backend authentication |
 
 ### Deployment
 
@@ -162,7 +162,7 @@ Small text chunks are buffered to prevent TTS engine stuttering:
 
 ### Bearer Token Authentication
 
-The `AGUI_API_KEY` is sent as `Authorization: Bearer <token>` with all requests. The `HttpAgent.clone()` method preserves headers, so per-call agent instances inherit authentication automatically.
+The `AGUI_BEARER_TOKEN` is sent as `Authorization: Bearer <token>` with all requests. The `HttpAgent.clone()` method preserves headers, so per-call agent instances inherit authentication automatically.
 
 ## Conversation Modes
 
@@ -205,7 +205,7 @@ npm run test:coverage # Coverage report
 
 **No response from assistant**
 - Verify `AGUI_BACKEND_URL` points to a running AG-UI backend
-- Check `AGUI_API_KEY` is correct
+- Check `AGUI_BEARER_TOKEN` is correct
 - Look at server logs (`LOG_LEVEL=debug` for details)
 
 **Interruptions not working**

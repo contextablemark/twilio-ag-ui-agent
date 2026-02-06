@@ -113,7 +113,7 @@ All configuration is via environment variables (no hardcoded URLs or secrets):
 
 **Required:**
 - `AGUI_BACKEND_URL` - AG-UI backend endpoint (server exits if not set)
-- `AGUI_API_KEY` - Bearer token for AG-UI backend authentication
+- `AGUI_BEARER_TOKEN` - Bearer token for AG-UI backend authentication
 
 **Deployment (auto-detected):**
 - `RAILWAY_PUBLIC_DOMAIN` - Set automatically by Railway
@@ -132,7 +132,7 @@ All configuration is via environment variables (no hardcoded URLs or secrets):
 1. Connect your GitHub repo to Railway
 2. Set required environment variables in Railway dashboard:
    - `AGUI_BACKEND_URL` - Your AG-UI backend endpoint
-   - `AGUI_API_KEY` - Your Bearer token
+   - `AGUI_BEARER_TOKEN` - Your Bearer token
 3. Railway auto-sets `PORT` and `RAILWAY_PUBLIC_DOMAIN`
 4. Configure Twilio phone number webhook to: `https://YOUR_RAILWAY_DOMAIN/twiml`
 
@@ -160,7 +160,7 @@ npx vitest TwilioAgent.test.js
 ## Key Implementation Details
 
 ### Bearer Token Authentication
-The HttpAgent sends `Authorization: Bearer <AGUI_API_KEY>` header with all requests to the AG-UI backend. The `clone()` method preserves headers, so per-call agent instances inherit authentication.
+The HttpAgent sends `Authorization: Bearer <AGUI_BEARER_TOKEN>` header with all requests to the AG-UI backend. The `clone()` method preserves headers, so per-call agent instances inherit authentication.
 
 ### TTS Buffering Strategy
 The implementation buffers small text chunks to prevent TTS engine buffer underflows:

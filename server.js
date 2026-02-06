@@ -7,8 +7,8 @@ dotenv.config();
 
 const PORT = process.env.PORT || 8080;
 
-// Domain resolution: Railway sets RAILWAY_PUBLIC_DOMAIN automatically,
-// NGROK_URL for local tunnel dev, otherwise falls back to localhost
+// Public domain of THIS server (so Twilio can reach us via WebSocket).
+// Railway sets RAILWAY_PUBLIC_DOMAIN automatically; NGROK_URL is for local tunnel dev only.
 const DOMAIN = process.env.NGROK_URL || process.env.RAILWAY_PUBLIC_DOMAIN || `localhost:${PORT}`;
 const isPublicDomain = !!(process.env.NGROK_URL || process.env.RAILWAY_PUBLIC_DOMAIN);
 const WS_URL = isPublicDomain ? `wss://${DOMAIN}/ws` : `ws://${DOMAIN}/ws`;
@@ -28,9 +28,9 @@ const backendAgentConfig = {
   url: process.env.AGUI_BACKEND_URL,
 };
 
-if (process.env.AGUI_API_KEY) {
+if (process.env.AGUI_BEARER_TOKEN) {
   backendAgentConfig.headers = {
-    Authorization: `Bearer ${process.env.AGUI_API_KEY}`
+    Authorization: `Bearer ${process.env.AGUI_BEARER_TOKEN}`
   };
 }
 
@@ -102,7 +102,7 @@ try {
   console.log(`  TwiML endpoint: ${isPublicDomain ? `https://${DOMAIN}` : `http://localhost:${PORT}`}/twiml`);
   console.log(`  Health check: ${isPublicDomain ? `https://${DOMAIN}` : `http://localhost:${PORT}`}/health`);
   console.log(`  AG-UI backend: ${process.env.AGUI_BACKEND_URL}`);
-  console.log(`  Bearer auth: ${process.env.AGUI_API_KEY ? 'enabled' : 'disabled'}`);
+  console.log(`  Bearer auth: ${process.env.AGUI_BEARER_TOKEN ? 'enabled' : 'disabled'}`);
 } catch (err) {
   fastify.log.error(err);
   process.exit(1);
