@@ -1,6 +1,6 @@
 import fastifyWs from "@fastify/websocket";
 import { v4 as uuidv4 } from "uuid";
-import { RunAgentInputSchema } from "@ag-ui/core";
+import { RunAgentInputSchema, EventType } from "@ag-ui/core";
 
 export class TwilioAgent {
   constructor(config) {
@@ -238,15 +238,16 @@ export class TwilioAgent {
 
   handleAgentEvent(event, ws, agent) {
     switch (event.type) {
-      case "TEXT_MESSAGE_CHUNK":
+      case EventType.TEXT_MESSAGE_CHUNK:
         // Handle self-contained chunk event by transforming it into START/CONTENT/END sequence
-        // This is a convenience event that combines all three phases
+        // Note: In 0.0.43+, the client's transformChunks operator in run() already handles this
+        // transformation, but we keep this handler as a defensive fallback.
         const chunkMessageId = event.messageId || uuidv4();
         const chunkDelta = event.delta || "";
 
         // Emit START
         this.handleAgentEvent({
-          type: "TEXT_MESSAGE_START",
+          type: EventType.TEXT_MESSAGE_START,
           messageId: chunkMessageId,
           role: event.role || "assistant"
         }, ws, agent);
@@ -254,7 +255,7 @@ export class TwilioAgent {
         // Emit CONTENT (if there's content)
         if (chunkDelta) {
           this.handleAgentEvent({
-            type: "TEXT_MESSAGE_CONTENT",
+            type: EventType.TEXT_MESSAGE_CONTENT,
             messageId: chunkMessageId,
             delta: chunkDelta
           }, ws, agent);
@@ -262,12 +263,12 @@ export class TwilioAgent {
 
         // Emit END
         this.handleAgentEvent({
-          type: "TEXT_MESSAGE_END",
+          type: EventType.TEXT_MESSAGE_END,
           messageId: chunkMessageId
         }, ws, agent);
         break;
 
-      case "TEXT_MESSAGE_START":
+      case EventType.TEXT_MESSAGE_START:
         // Initialize tracking for the new message
         agent._currentMessageId = event.messageId;
         agent._currentContent = "";
@@ -275,7 +276,7 @@ export class TwilioAgent {
         agent._outputBuffer = ""; // Buffer for TTS chunk optimization
         break;
 
-      case "TEXT_MESSAGE_CONTENT":
+      case EventType.TEXT_MESSAGE_CONTENT:
         // Accumulate content for the full message
         agent._currentContent = (agent._currentContent || "") + event.delta;
 
@@ -297,7 +298,7 @@ export class TwilioAgent {
         }
         break;
 
-      case "TEXT_MESSAGE_END":
+      case EventType.TEXT_MESSAGE_END:
         // Flush any remaining buffered content before ending
         if (agent._outputBuffer && agent._outputBuffer.length > 0) {
           ws.send(JSON.stringify({
@@ -344,7 +345,7 @@ export class TwilioAgent {
         break;
 
       // Tool-related events could be announced to the user
-      case "TOOL_CALL_START":
+      case EventType.TOOL_CALL_START:
         // Optionally announce tool usage to the user
         // ws.send(JSON.stringify({
         //   type: "text",
@@ -353,12 +354,26 @@ export class TwilioAgent {
         // }));
         break;
 
-      case "TOOL_CALL_END":
+      case EventType.TOOL_CALL_ARGS:
+      case EventType.TOOL_CALL_END:
+      case EventType.TOOL_CALL_CHUNK:
+      case EventType.TOOL_CALL_RESULT:
+        // Tool lifecycle events - handled passively
         break;
 
-      // State updates (not implemented - backend handles state)
-      case "STATE_SNAPSHOT":
-      case "STATE_DELTA":
+      // Run lifecycle events (new in AG-UI 0.0.43)
+      case EventType.RUN_STARTED:
+      case EventType.RUN_FINISHED:
+      case EventType.RUN_ERROR:
+      case EventType.STEP_STARTED:
+      case EventType.STEP_FINISHED:
+        // Run/step lifecycle managed by the observable subscription
+        break;
+
+      // State and message snapshot events
+      case EventType.STATE_SNAPSHOT:
+      case EventType.STATE_DELTA:
+      case EventType.MESSAGES_SNAPSHOT:
         // State management is handled by the backend
         break;
 

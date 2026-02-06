@@ -6,19 +6,35 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const PORT = process.env.PORT || 8080;
-const DOMAIN = process.env.NGROK_URL || `localhost:${PORT}`;
-const WS_URL = process.env.NGROK_URL ? `wss://${DOMAIN}/ws` : `ws://${DOMAIN}/ws`;
-const WELCOME_GREETING = process.env.WELCOME_GREETING || 
+
+// Domain resolution: Railway sets RAILWAY_PUBLIC_DOMAIN automatically,
+// NGROK_URL for local tunnel dev, otherwise falls back to localhost
+const DOMAIN = process.env.NGROK_URL || process.env.RAILWAY_PUBLIC_DOMAIN || `localhost:${PORT}`;
+const isPublicDomain = !!(process.env.NGROK_URL || process.env.RAILWAY_PUBLIC_DOMAIN);
+const WS_URL = isPublicDomain ? `wss://${DOMAIN}/ws` : `ws://${DOMAIN}/ws`;
+
+const WELCOME_GREETING = process.env.WELCOME_GREETING ||
   "Hi! I am an A I voice assistant powered by Twilio and AG-UI. Ask me anything!";
 
+// Validate required configuration
+if (!process.env.AGUI_BACKEND_URL) {
+  console.error("ERROR: AGUI_BACKEND_URL environment variable is required.");
+  console.error("Set it to your AG-UI backend endpoint (e.g. https://your-backend.example.com/chat)");
+  process.exit(1);
+}
 
-// Create the AG-UI HTTP backend agent
-const backendAgent = new HttpAgent({
-  url: process.env.AGUI_BACKEND_URL || "http://localhost:8000/chat",
-  headers: process.env.AGUI_API_KEY ? {
+// Create the AG-UI HTTP backend agent with Bearer token authentication
+const backendAgentConfig = {
+  url: process.env.AGUI_BACKEND_URL,
+};
+
+if (process.env.AGUI_API_KEY) {
+  backendAgentConfig.headers = {
     Authorization: `Bearer ${process.env.AGUI_API_KEY}`
-  } : {}
-});
+  };
+}
+
+const backendAgent = new HttpAgent(backendAgentConfig);
 
 // Create the Twilio agent that wraps the backend
 const twilioAgent = new TwilioAgent({
@@ -47,7 +63,7 @@ fastify.register(fastifyFormBody);
 
 // TwiML endpoint - returns XML for Twilio to establish WebSocket connection
 fastify.all("/twiml", async (request, reply) => {
-  fastify.log.info({ 
+  fastify.log.info({
     method: request.method,
     url: request.url,
     headers: request.headers,
@@ -55,16 +71,16 @@ fastify.all("/twiml", async (request, reply) => {
     wsUrl: WS_URL,
     domain: DOMAIN
   }, "TwiML endpoint called");
-  
+
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <ConversationRelay url="${WS_URL}" welcomeGreeting="${WELCOME_GREETING}" />
   </Connect>
 </Response>`;
-  
+
   fastify.log.info({ twiml, wsUrl: WS_URL }, "Sending TwiML response");
-  
+
   reply
     .type("text/xml")
     .send(twiml);
@@ -81,17 +97,12 @@ twilioAgent.attachToServer(fastify);
 // Start the server
 try {
   await fastify.listen({ port: PORT, host: '0.0.0.0' });
-  console.log(`
-🚀 Server running:
-   - HTTP: http://localhost:${PORT}
-   - WebSocket: ${WS_URL}
-   - TwiML endpoint: http://localhost:${PORT}/twiml
-   
-📞 To test with Twilio:
-   1. Make sure ngrok is running: ngrok http ${PORT}
-   2. Update NGROK_URL in .env with your ngrok URL
-   3. Configure your Twilio phone number webhook to: https://YOUR_NGROK_URL/twiml
-  `);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`  WebSocket: ${WS_URL}`);
+  console.log(`  TwiML endpoint: ${isPublicDomain ? `https://${DOMAIN}` : `http://localhost:${PORT}`}/twiml`);
+  console.log(`  Health check: ${isPublicDomain ? `https://${DOMAIN}` : `http://localhost:${PORT}`}/health`);
+  console.log(`  AG-UI backend: ${process.env.AGUI_BACKEND_URL}`);
+  console.log(`  Bearer auth: ${process.env.AGUI_API_KEY ? 'enabled' : 'disabled'}`);
 } catch (err) {
   fastify.log.error(err);
   process.exit(1);
