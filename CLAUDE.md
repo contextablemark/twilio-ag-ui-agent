@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Twilio Conversation Relay integration that uses the AG-UI protocol to build voice assistants. It translates between Twilio's WebSocket protocol and AG-UI events, enabling any AG-UI-compatible backend to power voice conversations.
+This is a Twilio Conversation Relay integration that uses the AG-UI protocol (v0.0.43) to build voice assistants. It translates between Twilio's WebSocket protocol and AG-UI events, enabling any AG-UI-compatible backend to power voice conversations.
 
 **Architecture:** `Phone Call → Twilio → ConversationRelay → WebSocket → TwilioAgent → AG-UI Protocol → Backend Agent`
 
@@ -33,13 +33,16 @@ npm run test:coverage
 
 **server.js** - Main entry point
 - Creates Fastify server with WebSocket support
-- Configures the HttpAgent (AG-UI backend client)
-- Sets up TwilioAgent with backend agent
+- Configures the HttpAgent (AG-UI backend client) with Bearer token auth
+- Validates required environment variables on startup
+- Supports Railway (RAILWAY_PUBLIC_DOMAIN), ngrok (NGROK_URL), and local development
 - Exposes `/twiml` endpoint for Twilio webhook
 - Exposes `/ws` endpoint for WebSocket connections
+- Exposes `/health` endpoint for health checks
 - Handles graceful shutdown
 
 **TwilioAgent.js** - Protocol translation layer (main logic)
+- Uses `EventType` enum from `@ag-ui/core` for all event type matching
 - Maintains isolated agent instances per call (keyed by callSid)
 - Translates Twilio WebSocket messages to AG-UI events
 - Handles three Twilio message types:
@@ -59,19 +62,25 @@ npm run test:coverage
 
 ### AG-UI Event Flow
 
-AG-UI supports two patterns for text messages:
+Uses `EventType` enum from `@ag-ui/core` for type-safe event matching. AG-UI supports two patterns for text messages:
 
 **Streaming Pattern (START/CONTENT/END):**
 ```javascript
-TEXT_MESSAGE_START → Initialize tracking
-TEXT_MESSAGE_CONTENT (delta) → { type: "text", token: delta, last: false }
-TEXT_MESSAGE_END → { type: "text", token: "", last: true }
+EventType.TEXT_MESSAGE_START → Initialize tracking
+EventType.TEXT_MESSAGE_CONTENT (delta) → { type: "text", token: delta, last: false }
+EventType.TEXT_MESSAGE_END → { type: "text", token: "", last: true }
 ```
 
 **Chunk Pattern (single event):**
 ```javascript
-TEXT_MESSAGE_CHUNK → Transforms into START/CONTENT/END sequence
+EventType.TEXT_MESSAGE_CHUNK → Transforms into START/CONTENT/END sequence
 ```
+
+**Additional event types handled (AG-UI 0.0.43):**
+- `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END`, `TOOL_CALL_CHUNK`, `TOOL_CALL_RESULT` - tool lifecycle
+- `RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR` - run lifecycle
+- `STEP_STARTED`, `STEP_FINISHED` - step lifecycle
+- `STATE_SNAPSHOT`, `STATE_DELTA`, `MESSAGES_SNAPSHOT` - state management
 
 **State tracking pattern:**
 - `TEXT_MESSAGE_START` sets `agent._currentMessageId`, `agent._currentContent = ""`, `agent._currentRole`, and `agent._outputBuffer = ""`
@@ -87,7 +96,7 @@ TEXT_MESSAGE_CHUNK → Transforms into START/CONTENT/END sequence
 - Self-contained event with optional `messageId`, `delta`, and `role` fields
 - Automatically transformed into the three-event sequence (START → CONTENT → END)
 - Generates messageId with `uuidv4()` if not provided
-- Useful for backends that send complete messages at once rather than streaming
+- Note: In AG-UI 0.0.43+, the client's `transformChunks` operator in `run()` already handles this transformation, but TwilioAgent keeps it as a defensive fallback
 
 ### Interrupt Handling
 
@@ -100,16 +109,40 @@ When user interrupts:
 
 ## Configuration
 
-Environment variables in `.env`:
+All configuration is via environment variables (no hardcoded URLs or secrets):
 
-- `NGROK_URL` - Your ngrok domain (no https://)
-- `PORT` - Server port (default: 8080)
+**Required:**
+- `AGUI_BACKEND_URL` - AG-UI backend endpoint (server exits if not set)
+- `AGUI_BEARER_TOKEN` - Bearer token for AG-UI backend authentication
+
+**Deployment (auto-detected):**
+- `RAILWAY_PUBLIC_DOMAIN` - Set automatically by Railway
+- `NGROK_URL` - Your ngrok domain for local tunnel dev (no https://)
+- `PORT` - Server port (default: 8080, set automatically by Railway)
+
+**Optional:**
 - `WELCOME_GREETING` - Initial greeting message
-- `AGUI_BACKEND_URL` - AG-UI backend endpoint
-- `AGUI_API_KEY` - Optional authorization token
 - `STATEFUL` - `true` (default) sends full history, `false` sends only current message
 - `MIN_CHUNK_SIZE` - Minimum characters to buffer before sending to TTS (default: 50)
 - `LOG_LEVEL` - `info` (default) or `debug`
+
+## Deployment
+
+### Railway
+1. Connect your GitHub repo to Railway
+2. Set required environment variables in Railway dashboard:
+   - `AGUI_BACKEND_URL` - Your AG-UI backend endpoint
+   - `AGUI_BEARER_TOKEN` - Your Bearer token
+3. Railway auto-sets `PORT` and `RAILWAY_PUBLIC_DOMAIN`
+4. Configure Twilio phone number webhook to: `https://YOUR_RAILWAY_DOMAIN/twiml`
+
+### Local Development
+1. Install dependencies: `npm install`
+2. Copy `.env.example` to `.env` and fill in required values
+3. Start ngrok: `ngrok http 8080`
+4. Set `NGROK_URL` in `.env` with ngrok domain
+5. Run server: `npm run dev`
+6. Configure Twilio phone number webhook to: `https://YOUR_NGROK_URL/twiml`
 
 ## Testing
 
@@ -117,6 +150,7 @@ Tests are in `TwilioAgent.test.js` using Vitest with:
 - Mocked WebSocket connections
 - Mocked AG-UI backend agents
 - Event emission testing for all Twilio message types
+- Coverage of all AG-UI 0.0.43 event types (run lifecycle, tool lifecycle, state events)
 
 Run specific test file:
 ```bash
@@ -124,6 +158,9 @@ npx vitest TwilioAgent.test.js
 ```
 
 ## Key Implementation Details
+
+### Bearer Token Authentication
+The HttpAgent sends `Authorization: Bearer <AGUI_BEARER_TOKEN>` header with all requests to the AG-UI backend. The `clone()` method preserves headers, so per-call agent instances inherit authentication.
 
 ### TTS Buffering Strategy
 The implementation buffers small text chunks to prevent TTS engine buffer underflows:
@@ -175,23 +212,13 @@ RunAgentInputSchema.parse({
 - Cleanup on close: Delete agent instance, unsubscribe from runs
 - Error handling: Send user-friendly error messages to Twilio
 
-## Development Setup
-
-1. Install dependencies: `npm install`
-2. Copy `.env.example` to `.env`
-3. Start ngrok: `ngrok http 8080`
-4. Update `NGROK_URL` in `.env` with ngrok domain
-5. Set `AGUI_BACKEND_URL` to your AG-UI backend
-6. Run server: `npm run dev`
-7. Configure Twilio phone number webhook to: `https://YOUR_NGROK_URL/twiml`
-
 ## Dependencies
 
 **Core:**
 - `fastify` v5.x - Web server
 - `@fastify/websocket` - WebSocket support
-- `@ag-ui/client` - HttpAgent for backend communication
-- `@ag-ui/core` - Schema validation
+- `@ag-ui/client` v0.0.43+ - HttpAgent for backend communication
+- `@ag-ui/core` v0.0.43+ - EventType enum and schema validation
 
 **Dev:**
 - `vitest` - Test runner

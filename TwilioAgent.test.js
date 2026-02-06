@@ -7,10 +7,29 @@ vi.mock('@fastify/websocket', () => ({
   default: vi.fn()
 }));
 
-// Mock the AG-UI core schema
+// Mock the AG-UI core schema and EventType enum
 vi.mock('@ag-ui/core', () => ({
   RunAgentInputSchema: {
     parse: vi.fn((input) => input)
+  },
+  EventType: {
+    TEXT_MESSAGE_START: 'TEXT_MESSAGE_START',
+    TEXT_MESSAGE_CONTENT: 'TEXT_MESSAGE_CONTENT',
+    TEXT_MESSAGE_END: 'TEXT_MESSAGE_END',
+    TEXT_MESSAGE_CHUNK: 'TEXT_MESSAGE_CHUNK',
+    TOOL_CALL_START: 'TOOL_CALL_START',
+    TOOL_CALL_ARGS: 'TOOL_CALL_ARGS',
+    TOOL_CALL_END: 'TOOL_CALL_END',
+    TOOL_CALL_CHUNK: 'TOOL_CALL_CHUNK',
+    TOOL_CALL_RESULT: 'TOOL_CALL_RESULT',
+    STATE_SNAPSHOT: 'STATE_SNAPSHOT',
+    STATE_DELTA: 'STATE_DELTA',
+    MESSAGES_SNAPSHOT: 'MESSAGES_SNAPSHOT',
+    RUN_STARTED: 'RUN_STARTED',
+    RUN_FINISHED: 'RUN_FINISHED',
+    RUN_ERROR: 'RUN_ERROR',
+    STEP_STARTED: 'STEP_STARTED',
+    STEP_FINISHED: 'STEP_FINISHED'
   }
 }));
 
@@ -354,6 +373,62 @@ describe('TwilioAgent', () => {
 
       // Should NOT store in message history (stateless mode)
       expect(mockAgent.messages).toHaveLength(0);
+    });
+
+    it('should handle run lifecycle events without error', () => {
+      // These events should be handled passively (no WebSocket send, no state change)
+      const lifecycleEvents = [
+        { type: 'RUN_STARTED', threadId: 'thread-1', runId: 'run-1' },
+        { type: 'RUN_FINISHED', threadId: 'thread-1', runId: 'run-1' },
+        { type: 'RUN_ERROR', threadId: 'thread-1', runId: 'run-1', message: 'test error' },
+        { type: 'STEP_STARTED', stepName: 'step-1' },
+        { type: 'STEP_FINISHED', stepName: 'step-1' }
+      ];
+
+      for (const event of lifecycleEvents) {
+        expect(() => {
+          twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+        }).not.toThrow();
+      }
+
+      // No messages should be sent to Twilio for lifecycle events
+      expect(mockWs.send).not.toHaveBeenCalled();
+    });
+
+    it('should handle tool lifecycle events without error', () => {
+      const toolEvents = [
+        { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'search' },
+        { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-1', delta: '{"query":"test"}' },
+        { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
+        { type: 'TOOL_CALL_RESULT', toolCallId: 'tc-1', result: 'found' },
+        { type: 'TOOL_CALL_CHUNK', toolCallId: 'tc-1', toolCallName: 'search', delta: '{}' }
+      ];
+
+      for (const event of toolEvents) {
+        expect(() => {
+          twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+        }).not.toThrow();
+      }
+
+      // No messages should be sent to Twilio for tool events
+      expect(mockWs.send).not.toHaveBeenCalled();
+    });
+
+    it('should handle state and snapshot events without error', () => {
+      const stateEvents = [
+        { type: 'STATE_SNAPSHOT', snapshot: { key: 'value' } },
+        { type: 'STATE_DELTA', delta: [{ op: 'replace', path: '/key', value: 'new' }] },
+        { type: 'MESSAGES_SNAPSHOT', messages: [] }
+      ];
+
+      for (const event of stateEvents) {
+        expect(() => {
+          twilioAgent.handleAgentEvent(event, mockWs, mockAgent);
+        }).not.toThrow();
+      }
+
+      // No messages should be sent to Twilio for state events
+      expect(mockWs.send).not.toHaveBeenCalled();
     });
   });
   
